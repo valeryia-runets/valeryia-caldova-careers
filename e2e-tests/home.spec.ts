@@ -52,3 +52,55 @@ test.describe('Open roles listing', () => {
         expect(results.violations).toEqual([]);
     });
 });
+
+test.describe('Role filters', () => {
+    /** Locate role cards that are currently shown (not hidden by filters). */
+    const visibleCards = (page: import('@playwright/test').Page) =>
+        page.getByTestId('role-card').locator('visible=true');
+
+    test('filters by department', async ({ page }) => {
+        await page.goto('/');
+        await page.getByTestId('department-filter').getByLabel('Finance').check();
+        await expect(visibleCards(page)).toHaveCount(2);
+        await expect(page.getByTestId('role-department').locator('visible=true')).toHaveText([
+            'Finance',
+            'Finance',
+        ]);
+    });
+
+    test('filters by location', async ({ page }) => {
+        await page.goto('/');
+        await page.getByTestId('location-filter').getByLabel('Woodinville, WA, USA').check();
+        await expect(visibleCards(page)).toHaveCount(3);
+    });
+
+    test('combines department and location, and shows empty state', async ({ page }) => {
+        await page.goto('/');
+        await test.step('combine filters', async () => {
+            await page.getByTestId('department-filter').getByLabel('Finance').check();
+            await page.getByTestId('location-filter').getByLabel('Woodinville, WA, USA').check();
+            await expect(visibleCards(page)).toHaveCount(1);
+        });
+        await test.step('no matches', async () => {
+            await page.getByTestId('department-filter').getByLabel('Marketing').check();
+            await page.getByTestId('department-filter').getByLabel('Finance').uncheck();
+            await expect(visibleCards(page)).toHaveCount(0);
+            await expect(page.getByTestId('empty-state-text')).toContainText('No roles match');
+        });
+    });
+
+    test('resets filters to the full list', async ({ page }) => {
+        await page.goto('/');
+        await page.getByTestId('department-filter').getByLabel('Finance').check();
+        await expect(visibleCards(page)).toHaveCount(2);
+        await page.getByTestId('filter-reset').click();
+        await expect(visibleCards(page)).toHaveCount(expectedRoleCount);
+        await expect(page).not.toHaveURL(/department=/);
+    });
+
+    test('restores filters from the URL', async ({ page }) => {
+        await page.goto('/?department=Finance');
+        await expect(page.getByTestId('department-filter').getByLabel('Finance')).toBeChecked();
+        await expect(visibleCards(page)).toHaveCount(2);
+    });
+});
