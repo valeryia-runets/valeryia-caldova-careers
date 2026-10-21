@@ -3,7 +3,8 @@ import { getCollection } from 'astro:content';
 import Layout from '../layouts/Layout.astro';
 import RoleCard from '../components/RoleCard.astro';
 import EmptyState from '../components/EmptyState.astro';
-import { sortByNewest } from '../lib/jobs';
+import RoleFilters from '../components/RoleFilters.astro';
+import { sortByNewest, getDepartments, getLocations } from '../lib/jobs';
 import type { Job } from '../types/job';
 
 export const prerender = true;
@@ -12,6 +13,8 @@ const entries = await getCollection('jobs');
 const jobs: Job[] = sortByNewest(
     entries.map((entry) => ({ slug: entry.id, ...entry.data })),
 );
+const departments = getDepartments(jobs);
+const locations = getLocations(jobs);
 ---
 
 <Layout title="Caldova Careers — Open roles">
@@ -29,12 +32,86 @@ const jobs: Job[] = sortByNewest(
     {jobs.length === 0 ? (
       <EmptyState text="There are no open roles right now. Check back soon." />
     ) : (
+      <RoleFilters departments={departments} locations={locations} />
       <div
         class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"
         data-testid="roles-grid"
       >
         {jobs.map((job) => <RoleCard job={job} />)}
       </div>
+      <div id="no-matching-roles" data-testid="no-matching-roles" hidden>
+        <EmptyState text="No roles match the selected filters. Try removing a filter or reset them." />
+      </div>
     )}
   </div>
 </Layout>
+
+<script>
+  import { filterJobs } from '../lib/jobs';
+
+  const form = document.querySelector<HTMLFormElement>('[data-testid="role-filters"]');
+  const grid = document.querySelector<HTMLElement>('[data-testid="roles-grid"]');
+  const emptyMessage = document.getElementById('no-matching-roles');
+  const count = document.querySelector<HTMLElement>('[data-testid="filter-count"]');
+
+  if (form && grid && emptyMessage && count) {
+    const cards = [...grid.querySelectorAll<HTMLElement>('[data-testid="role-card"]')].map(
+      (element) => ({
+        element,
+        department: element.dataset.department ?? '',
+        location: element.dataset.location ?? '',
+      }),
+    );
+    /** Return the filter checkboxes with the given group name. */
+    const checkboxes = (name: string): HTMLInputElement[] => [
+      ...form.querySelectorAll<HTMLInputElement>(`input[name="${name}"]`),
+    ];
+    /** Return the values of the checked boxes in a filter group. */
+    const selected = (name: string): string[] =>
+      checkboxes(name).filter((box) => box.checked).map((box) => box.value);
+
+    /** Show only matching role cards and update the empty state and count. */
+    const apply = (): void => {
+      const matches = new Set(
+        filterJobs(cards, { departments: selected('department'), locations: selected('location') }),
+      );
+      cards.forEach((card) => {
+        card.element.hidden = !matches.has(card);
+      });
+      grid.hidden = matches.size === 0;
+      emptyMessage.hidden = matches.size !== 0;
+      count.textContent = `Showing ${matches.size} of ${cards.length} roles`;
+    };
+
+    /** Mirror the current selection into the URL query string. */
+    const syncUrl = (): void => {
+      const params = new URLSearchParams();
+      ['department', 'location'].forEach((name) =>
+        selected(name).forEach((value) => params.append(name, value)),
+      );
+      const query = params.toString();
+      history.replaceState(null, '', query ? `?${query}` : location.pathname);
+    };
+
+    const params = new URLSearchParams(location.search);
+    ['department', 'location'].forEach((name) => {
+      const values = params.getAll(name);
+      checkboxes(name).forEach((box) => {
+        box.checked = values.includes(box.value);
+      });
+    });
+
+    form.addEventListener('change', () => {
+      apply();
+      syncUrl();
+    });
+    form.addEventListener('reset', () => {
+      // Reset clears checkboxes after the event; defer so state is current.
+      setTimeout(() => {
+        apply();
+        syncUrl();
+      });
+    });
+    apply();
+  }
+</script>
